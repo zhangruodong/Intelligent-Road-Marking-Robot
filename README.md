@@ -10,24 +10,28 @@
 - **四轮步进电机底盘**：TIM3 四路 PWM 输出脉冲 + 方向脚，直线运动带梯形加减速，旋转 / 平移为固定速度。
 - **舵机平滑运动**：TIM4 双路 PWM（20ms 周期），三次 Hermite（smoothstep）缓起缓停。
 - **自动标线流程**：`P` 指令一键画出完整矩形（长 5.3m × 宽 2.5m），水泵随行喷漆。
-- **3 路串口**：USART1 / USART2 / USART3 均 9600 8N1，中断接收。
+- **2 路串口**：USART1（蓝牙手机）/ USART2（树莓派上位机），均 9600 8N1，中断接收。
 - **OLED 实时状态显示**：软件 I2C 屏显示当前状态。
 
 **上位机（marking-host，树莓派）**
 
 - **PyQt5 控制面板**：画车位控制（标准 / 路沿）+ 二次喷涂 + 整机自检 + 水泵清洗 + 紧急停止，串口收发日志。
-- **单字节串口协议**：每条指令一个 ASCII 字符（`P`/`D`/`K`/`N`/`C`/`T`），9600 8N1。
+- **单字节串口协议**：每条指令一个 ASCII 字符（`P`/`D`/`K`/`G`/`N`/`C`/`W`/`T`），9600 8N1。
 - **摄像头画面弹窗**：二次喷涂 / 画路沿时弹出实时画面。
-- **黄色标线检测**：HSV 提黄 + Canny + 霍夫直线，识别地面车道线（独立脚本 `camera_test.py`）。
+- **黄色标线检测（闭环）**：HSV 提黄 → 形态学去噪 → 闭运算补裂缝 → 轮廓长宽比筛线状 →
+  PCA 主方向定矩形 → 在矩形内量**原始黄像素**的覆盖率判破损（阈值集中在
+  `core/line_quality.py`，不依赖 Qt，可单独跑 `vision_test.py`）。
+  破损就按固定周期往下位机发一次 `C` 补喷一段。
+  (`camera_test.py` 里另有一套 HSV + Canny + 霍夫的调试用可视化，不参与闭环。)
 
 ## 硬件平台
 
 | 项目 | 参数 |
 |---|---|
 | 下位机 MCU | STM32F103C8T6（LQFP48，64KB Flash，72MHz） |
-| 上位机 | 树莓派 5B + Python3 + PyQt5 + OpenCV |
+| 上位机 | 树莓派 4B + Python3 + PyQt5 + OpenCV |
 | 下位机开发环境 | Keil MDK（ARMCC） |
-| 串口 | USART1 / USART2 / USART3，9600 8N1 |
+| 串口 | USART1（蓝牙）/ USART2（树莓派），9600 8N1 |
 
 ## 目录结构
 
@@ -42,9 +46,8 @@ Intelligent-Road-Marking-Robot/
 │   ├── install.sh           # 树莓派部署脚本
 │   └── start.sh             # 桌面启动脚本
 └── marking-firmware/        # 下位机（STM32 Keil 工程）
-    ├── Hardware/            # 外设驱动（电机/舵机/水泵蜂鸣器/OLED/串口/状态机/自检）
+    ├── Hardware/            # 外设驱动（电机/舵机/水泵蜂鸣器/OLED/串口/状态机）
     ├── User/                # main.c、stm32f10x_it.c、stm32f10x_conf.h
-    ├── System/              # Delay 延时
     ├── Library/             # STM32F10x 标准外设库
     ├── Start/               # 启动文件、system_stm32f10x、core_cm3
     └── Project.uvprojx      # Keil 工程
@@ -67,9 +70,8 @@ Intelligent-Road-Marking-Robot/
 | 蜂鸣器 | PB14 | 输出 | 低电平响 |
 | OLED 屏 | PB8 = SCL，PB9 = SDA | 软件 I2C | 从机地址 0x78 |
 | 心跳指示灯 | PB15 | 输出 | TIM1 1ms 中断，500ms 翻转 |
-| 串口 USART1 | PA9 = TX，PA10 = RX | UART | 9600 8N1 |
-| 串口 USART2 | PA2 = TX，PA3 = RX | UART | 9600 8N1 |
-| 串口 USART3 | PB10 = TX，PB11 = RX | UART | 9600 8N1 |
+| 串口 USART1（蓝牙手机） | PA9 = TX，PA10 = RX | UART | 9600 8N1，RX 上拉输入 |
+| 串口 USART2（树莓派） | PA2 = TX，PA3 = RX | UART | 9600 8N1，RX 上拉输入 |
 
 ## 串口指令（下位机）
 
@@ -84,13 +86,23 @@ Intelligent-Road-Marking-Robot/
 | `Z` | 原地左转（逆时针） |
 | `A` | 左移（平移） |
 | `X` | 右移（平移） |
-| `T` | 强制停止所有执行器 |
-| `P` | 自动标线（长 5.3m × 宽 2.5m 完整矩形） |
+| `T` | 强制停止所有执行器（状态停在 TING，`C` 等会自己动作的指令随之失效） |
+| `P` | 画车位（标准，长 5.3m × 宽 2.5m 完整矩形，水泵随行） |
+| `C` | 二次喷涂补线，泵开直行一段后自停。**只在 `W` 状态被接受** —— 已经在喷就不重进、不打断正在跑的活、急停后进不来 |
 | `K` | 开水泵 |
 | `G` | 关水泵 |
-| `D` | 打开舵臂 |
-| `J` | 关闭舵臂 |
+| `D` | 整机自检（开臂 → 前进 → 合臂） |
+| `J` | 关闭舵臂（舵机平滑回到 40° / 90°） |
 | `F` | 蜂鸣提示（后退提示音） |
+| `+` / `-` | 蓝牙专用调速，上位机发来忽略。运动中的按键只改目标速度，斜坡自己走过去 |
+
+需要单独说明的两点：
+
+- **`N`（画车位（路沿））下位机尚未实现**，按下去是个空操作。上位机这边按钮和指令表都有，
+  缺口由 `protocol_test.py::test_not_implemented_is_still_true` 盯着 —— 固件补上它，测试就会报。
+- **上电首次合臂**：`Hardware_Init` 会先 `Servo_SetAngle(40)` / `Servo2_SetAngle(90)`，
+  因为 DPWM 初始 `TIM_Pulse = 0`（占空比 0%），不写这两句舵机在收到第一条 `J`/`D`
+  之前完全没有信号，舵臂会被外力带着乱动。
 
 ## 上位机通信协议
 
@@ -101,11 +113,28 @@ Intelligent-Road-Marking-Robot/
 | `P` | 画车位（标准） |
 | `D` | 整机自检 |
 | `K` | 水泵清洗 |
-| `N` | 画车位（路沿） |
-| `C` | 二次喷涂 |
+| `G` | 关水泵 |
+| `N` | 画车位（路沿）—— 下位机未实现 |
+| `C` | 二次喷涂（检测到破损自动发，每 2s 一条） |
+| `W` | 停止复位 |
 | `T` | 紧急停止 |
 
-下位机回传同为单字节，上位机按同表解析状态。
+按钮表只定义在 [marking-host/core/protocol.py](marking-host/core/protocol.py) 的 `PANEL_BUTTONS`
+里一处，`main_window.py` 和摄像头弹窗判断都从那儿取 —— 标签写两遍就会出现
+"某个按钮悄悄失效"（`N`/`C` 当初就是这么漏的）。
+
+下位机回传同为单字节（收到什么原样回显什么），上位机按同表解析状态。
+
+### `C` 的闭环怎么走
+
+`二次喷涂` 会开一个带串口的摄像头窗口（`CameraWidget(serial_mgr, auto_paint=True)`），
+检测到破损就调 `maybe_send_respray()` 发 `C`。几个刻意的设计：
+
+- **一次只发一条、间隔 ≥ `SPRAY_INTERVAL_S`（2s，略大于下位机 `RESPRAY_PULSE` 跑完的时间）**，
+  全速重发没有意义，下位机那边也只在 `W` 状态接受。
+- **按下面板上任何别的键就撤下自动喷涂**（`send_button` 里把 `auto_paint` 置回 `False`），
+  不然按了"停止复位"或"关水泵"两秒后相机又自己开喷。要接着喷就再按一次"二次喷涂"。
+- **只是取景的"画车位（路沿）"窗口 `auto_paint=False`，一个字节都不发。**
 
 ## 编译
 
@@ -126,6 +155,34 @@ python3 main.py
 
 ## 注意事项
 
-- **上下位机指令集待对齐**：上位机已切换为单字节画车位指令（`P`/`D`/`K`/`N`/`C`/`T`，9600），下位机固件仍为旧标线指令集（`W`/`U`/`R`/`Y`/`Z`…），`N`/`C` 未实现、`D` 语义不同（下位机 = 开舵臂）。联调前需升级 firmware 对齐。
+- **上下位机的指令集对齐由测试守着**：`python3 protocol_test.py` 直接从固件
+  `system.c` 抠 `case '...'` 和面板按钮表对账，加指令忘了同步会当场报。唯一
+  已知的缺口是 `N`，写在该测试的 `NOT_IMPLEMENTED` 里。
+- **上位机串口默认 `/dev/serial0`**（`main.py` / `serial_manager.py` / `serial_test.py`）。
+  `serial0` 是 udev 符号链接，永远指向"当前接在排针上的那个串口"，所以底下换 UART
+  不用改代码。临时换口（比如 USB 转串口）用环境变量：`MARKING_PORT=/dev/ttyUSB0 ./start.sh`。
+- **树莓派 4B 的排针串口是哪个 UART 取决于配置**，别写死成 `ttyAMA0`：
+
+  | `config.txt` | 排针（GPIO14/15） | 蓝牙用 |
+  |---|---|---|
+  | 默认（蓝牙开着） | `/dev/ttyS0`（mini-UART） | `/dev/ttyAMA0`（PL011） |
+  | `dtoverlay=disable-bt` | `/dev/ttyAMA0`（PL011） | 无 |
+
+  默认配置下排针是 **mini-UART**，它的波特率分频是从 VPU 核心时钟推出来的，核心
+  时钟一变（负载、turbo）实际波特率就跟着漂 —— 9600 下会开始丢字节、指令错乱。
+  上位机同时跑着 OpenCV + PyQt5，这事儿真会发生。**推荐在
+  `/boot/firmware/config.txt` 加一行 `dtoverlay=disable-bt`**：排针换成时钟独立的
+  PL011，蓝牙功能没了（本项目不用蓝牙，STM32 那侧 USART1 是给手机用的），
+  `/dev/serial0` 会自动指过去，代码一行都不用改。
+- **串口控制台必须关掉**（`raspi-config` → Interface → Serial Port → login shell 选
+  No、hardware 选 Yes），否则内核日志会从 TX 打到 STM32 那边去。
+- **步进是开环的**，没有编码器，丢步不可恢复。所以运动起停都走梯形斜坡
+  （`RAMP_SOFT_ARR` 1800 → `speed_arr`，每 `RAMP_SOFT_STEP_PULSE` 个脉冲走
+  `RAMP_SOFT_STEP_ARR`）；调试时别绕过斜坡，也别在加速段中间硬改频率。
+  真要把累积误差消掉，只能靠加限位/回零开关重新对基准。
+- **舵机角度钳在 0~180°**（`Servo.c` 的 `Servo_ClampAngle`）。越界的指令会
+  停在端点角度保持住，而不是让 PWM 比较值出界：出界的比较值要么算出 0（恒低），
+  要么超过 ARR（恒高），两种都没有 500~2500us 的有效脉宽 —— 舵机收不到位置信号
+  就没有保持力矩，机械臂会靠重力耷下来。
 - **PA13（SWDIO）/ PA14（SWCLK）保留给 SWD 下载调试**，不要接外设。
 - 步进电机方向宏（`M1_FWD` ~ `M4_REV`）已按实车标定，若换电机 / 接线后方向反转，在 `StepMotor_New.h` 里取反即可。

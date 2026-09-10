@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from ui.camera_widget import CameraWidget
+from core.protocol import PANEL_BUTTONS, CAMERA_BUTTONS, CAMERA_OFF_BUTTONS
 
 class MainWindow(QWidget):
     append_send_signal = pyqtSignal(str)
@@ -24,7 +25,14 @@ class MainWindow(QWidget):
         self.serial_mgr.data_received.connect(
             self.on_data_received
         )
+        # error_signal 原来一个槽都没接：串口没打开时 send() 是静默失败，
+        # 发送日志照记、摄像头上的 spray 计数照涨，看着像在干活，
+        # 其实一个字节都没上总线。
+        self.serial_mgr.error_signal.connect(self.on_serial_error)
         self.serial_mgr.open()
+
+    def on_serial_error(self, msg):
+        self.append_send_signal.emit(f"串口错误: {msg} —— 字节没发出去")
 
     def init_ui(self):
         self.resize(1000, 500)
@@ -48,24 +56,15 @@ class MainWindow(QWidget):
         left_layout.addWidget(self.status_label)
         left_layout.addStretch()
 
-        self.btn_park = QPushButton("画车位（标准）")
-        self.btn_forward = QPushButton("整机自检")
-        self.btn_backward = QPushButton("水泵清洗")
-        self.btn_left = QPushButton("画车位（路沿）")
-        self.btn_right = QPushButton("二次喷涂")
-        self.btn_stop = QPushButton("紧急停止")
-
-        self.control_buttons = [
-            self.btn_park,
-            self.btn_forward, self.btn_backward,
-            self.btn_left, self.btn_right, self.btn_stop
-        ]
-
-        for btn in self.control_buttons:
+        # 按钮表在 core/protocol.py 里，和指令表放在一起，避免标签写两遍对不上
+        self.control_buttons = []
+        for label, _cmd in PANEL_BUTTONS:
+            btn = QPushButton(label)
             btn.clicked.connect(self.send_button)
             btn.setMinimumHeight(40)
             btn.setStyleSheet("font-size:20px;")
             left_layout.addWidget(btn)
+            self.control_buttons.append(btn)
 
         self.btn_settings = QPushButton("设置")
         self.btn_settings.setMinimumHeight(40)
@@ -87,15 +86,8 @@ class MainWindow(QWidget):
         self.btn_clear_send.clicked.connect(self.clear_send_log)
         center_layout.addWidget(self.btn_clear_send)
 
-        self.send_mode_box = QComboBox()
-        self.send_mode_box.addItems(["自动", "HEX", "ASCII"])
-        self.send_mode_box.setStyleSheet("""
-            QComboBox { font-size:14px; min-height:30px; }
-            QComboBox QAbstractItemView { font-size:14px; }
-        """)
-        center_layout.addWidget(QLabel("发送模式:"))
-        center_layout.addWidget(self.send_mode_box)
-
+        # 这里原来有个"发送模式"下拉框，但发送路径根本不读它（指令固定是
+        # 单字节 ASCII），是个死控件，删掉。接收模式那个是真的在用，保留。
         self.send_pause_checkbox = QCheckBox("暂停自动滚动")
         center_layout.addWidget(self.send_pause_checkbox)
 
@@ -195,48 +187,70 @@ class MainWindow(QWidget):
 
     # ---------------- 核心按钮功能 ----------------
     def send_button(self):
-        btn = self.sender()
-        cmd_map = {
-            "画车位（标准）": b'P',
-            "整机自检": b'D',
-            "水泵清洗": b'K',
-            "画车位（路沿）": b'N',
-            "二次喷涂": b'C',
-            "紧急停止": b'T'
-        }
-        data = cmd_map.get(btn.text(), b'')
-        if data:
-            self.serial_mgr.send(data)
-            self.append_send_log(data, btn.text())
-            self.status_label.setText(f"状态:\n{btn.text()}")
+        label = self.sender().text()
+        data = dict(PANEL_BUTTONS).get(label)
+        if data is None:
+            return
 
-            # ---------------- 摄像头弹窗 ----------------
-            if btn.text() in ["二次喷涂", "画车位（路沿）"]:
-                if hasattr(self, 'camera_window') and self.camera_window.isVisible():
-                    self.camera_widget.stop_camera()
-                    self.camera_window.close()
-                self.open_camera_window()
+        self.serial_mgr.send(data)
+        self.append_send_log(data, label)
+        self.status_label.setText(f"状态:\n{label}")
 
-            # ---------------- 紧急停止 ----------------
-            if btn.text() == "紧急停止":
-                if hasattr(self, 'camera_window') and self.camera_window.isVisible():
-                    self.camera_widget.stop_camera()
-                    self.camera_window.close()
+        # 按了面板上别的键 = 不想让它自己喷了，先把相机闭环撤下来。
+        # 不撤的话按"停止复位"或者"关水泵"，2 秒后相机又自己开喷 ——
+        # 人按的停停不停得住全看手速，这不能接受。要接着喷就再按一次
+        # "二次喷涂"（下面会重新开一个武装好的窗口）。
+        # 下位机那边也堵了一道：'C' 只在 STATE_WAIT 被接受。
+        widget = getattr(self, 'camera_widget', None)
+        if widget is not None and label not in CAMERA_BUTTONS:
+            widget.auto_paint = False
+
+        # ---------------- 摄像头弹窗 ----------------
+        if label in CAMERA_BUTTONS:
+            self.close_camera_window()
+            self.open_camera_window(label)
+        elif label in CAMERA_OFF_BUTTONS:
+            self.close_camera_window()
 
     # ---------------- 摄像头弹窗 ----------------
-    def open_camera_window(self):
+    def close_camera_window(self):
+        win = getattr(self, 'camera_window', None)
+        if win is None:
+            return
+        self.camera_widget.stop_camera()
+        win.close()
+        win.deleteLater()      # 不然每按一次 N/C 就漏一个 QWidget
+        self.camera_window = None
+        self.camera_widget = None
+
+    def open_camera_window(self, label):
         self.camera_window = QWidget()
         self.camera_window.setWindowTitle("摄像头画面")
         self.camera_window.resize(800, 600)
         layout = QVBoxLayout()
         self.camera_window.setLayout(layout)
-        self.camera_widget = CameraWidget()
+        self.camera_widget = CameraWidget(
+            self.serial_mgr,
+            # 只有"二次喷涂"是相机闭环：看到破损就自动发 C。
+            # "画车位（路沿）"只是借这个窗口取景，一个字节都不发。
+            auto_paint=(label == "二次喷涂"),
+        )
         layout.addWidget(self.camera_widget)
         self.camera_widget.start_camera()
         self.camera_window.closeEvent = self.camera_close_event
         self.camera_window.show()
 
+    # ---------------- 主窗口关闭 ----------------
+    def closeEvent(self, event):
+        # 摄像头窗口是没有父窗口的顶层窗口（camera_window = QWidget()），
+        # 主界面关掉它不会跟着关，还会继续自己发 'C'。
+        self.close_camera_window()
+        event.accept()
+
     def camera_close_event(self, event):
-        if hasattr(self, 'camera_widget'):
-            self.camera_widget.stop_camera()
+        # 用户点右上角 X 时走这里。子控件的 closeEvent 不一定会触发
+        # （父窗口关闭只是把子控件隐藏），所以摄像头必须在这里自己停。
+        widget = getattr(self, 'camera_widget', None)
+        if widget is not None:
+            widget.stop_camera()
         event.accept()

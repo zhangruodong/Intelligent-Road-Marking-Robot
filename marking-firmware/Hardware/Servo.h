@@ -29,12 +29,13 @@ void Servo2_Init(void);
 // 基础角度设置
 void Servo_SetAngle(float Angle);
 void Servo2_SetAngle(float Angle);
+float Servo_GetAngle(uint8_t servo_id);  // 当前角度，做平滑运动的起点
 
 // 平滑运动控制
 void Servo_StartSmoothMotion(uint8_t servo_id, float start_angle, 
                             float end_angle, uint32_t duration_ms);
-void Servo_MoveTo(uint8_t servo_id, float target_angle, uint32_t duration_ms);
 void Servo_UpdateAllMotions(void);
 uint8_t Servo_IsMoving(uint8_t servo_id);
+void Servo_StopAllMotions(void);  // 打断：停在当前角度保持住，is_active 清零
 
 #endif

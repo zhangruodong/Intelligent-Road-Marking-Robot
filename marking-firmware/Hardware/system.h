@@ -6,11 +6,9 @@
 #include "string.h"
 #include <stdio.h>
 #include <stdbool.h>
-#include "Delay.h"
 #include "OLED.h"
 #include "USART.h"
 #include "string.h"
-#include "SelfTest.h"
 #include  "PumpBuzzer.h"
 #include  "Servo.h"
 #include  "StepMotor_New.h"
@@ -21,7 +19,7 @@ typedef enum {
     STATE_WAIT = 'W',   //
 		STATE_KAI='K',//水泵开
 		STATE_GUAN='G',//水泵关
-		STATE_KSERVO='D',//夹臂开
+		STATE_SELFCHECK='D',//整机自检（舵机动一下 + 前进一点）
 		STATE_GSERVO='J',//夹臂关
     STATE_RETREAT_BEEP = 'F',// 提示
     STATE_APPROACH = 'U',//前进
@@ -31,13 +29,13 @@ typedef enum {
 	  STATE_MOVE_LEFT = 'A',    // 左移
     STATE_MOVE_RIGHT = 'X',    // 右移
 		STATE_TING='T',//急停,
-	  STATE_PAINT = 'P'   //
+	  STATE_PAINT = 'P',   //
+	  STATE_RESPRAY = 'C'  // 二次喷涂补线（相机检测到破损时上位机发）
 } SystemState;
 typedef struct {
     SystemState state;           // 当前系统状态
 		SystemState last_state;      // 上一次的状态（用于检测进入）//
     uint32_t state_timestamp;    // 状态进入时间戳（毫秒）
-    uint8_t last_cmd;      // 待处理指令            // 最新接收的串口指令
 } SystemCtrl;
 
 
@@ -47,8 +45,6 @@ void Hardware_Init(void);
 void TIM1_Init(void);
 void GPIO15_Init(void);
 void TIM1_UP_IRQHandler(void);
-void Hardware_Init(void);
-void System_StateMachine(void) ;
 void ProcessCommand(void) ;
 
 
