@@ -21,7 +21,10 @@ void Serial1_Init(void)
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     // PA10作为USART1_RX（浮空输入）
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;     // 浮空输入
+    // 上拉输入，不是浮空。对端（蓝牙模块 / 树莓派）没上电或者没插的时候，
+    // 悬空的 RX 脚被电机和驱动器的干扰一耦合就能合成一个起始位，HandleCmd
+    // 拿到一个任意字节照执行 —— 'U' 是前进，'P' 是开始画车位。
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;             // 上拉输入
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10;                // PA10
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
@@ -76,21 +79,27 @@ void Serial1_SendNumber(uint32_t Number, uint8_t Length)
     }
 }
 
-uint8_t Serial1_GetRxFlag(void)
+/**
+  * 函    数：取一个已收到的字节（标志位和数据一起读，原子）
+  * 参    数：out 用来带回数据
+  * 返 回 值：1 = 取到了，0 = 没有新字节
+  */
+uint8_t Serial1_TakeRxData(uint8_t *out)
 {
-    if (Serial1_RxFlag == 1)
-    {
+    uint8_t got = 0;
+    // 原来那种 GetRxFlag() + GetRxData() 是两次调用，中间可以被打断：标志位还是
+    // 1 但数据已经被后一个字节盖掉了 —— 前一个字节静默消失；反过来标志位还没
+    // 置上就先读了数据，同一个字节会被执行两次（'P' 画两次车位）。
+    // 两边都圈在临界区里，读到的数据和清标志一定配套。
+    __disable_irq();
+    if (Serial1_RxFlag) {
+        *out = Serial1_RxData;
         Serial1_RxFlag = 0;
-        return 1;
+        got = 1;
     }
-    return 0;
+    __enable_irq();
+    return got;
 }
-
-uint8_t Serial1_GetRxData(void)
-{
-    return Serial1_RxData;
-}
-
 void USART1_IRQHandler(void)  // 改为USART1中断处理函数
 {
     if (USART_GetITStatus(USART1, USART_IT_RXNE) == SET)  // USART1
@@ -126,7 +135,10 @@ void Serial2_Init(void)
     GPIO_Init(GPIOA, &GPIO_InitStructure);
 
     // PA3作为USART2_RX（浮空输入）
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;     // 浮空输入
+    // 上拉输入，不是浮空。对端（蓝牙模块 / 树莓派）没上电或者没插的时候，
+    // 悬空的 RX 脚被电机和驱动器的干扰一耦合就能合成一个起始位，HandleCmd
+    // 拿到一个任意字节照执行 —— 'U' 是前进，'P' 是开始画车位。
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;             // 上拉输入
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;                 // PA3
 		//GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(GPIOA, &GPIO_InitStructure);
@@ -204,30 +216,26 @@ void Serial2_SendNumber(uint32_t Number, uint8_t Length)
 
 
 /**
-  * 函    数：获取串口接收标志位
-  * 参    数：无
-  * 返 回 值：串口接收标志位，范围：0~1，接收到数据后，标志位置1，读取后标志位自动清零
+  * 函    数：取一个已收到的字节（标志位和数据一起读，原子）
+  * 参    数：out 用来带回数据
+  * 返 回 值：1 = 取到了，0 = 没有新字节
   */
-uint8_t Serial2_GetRxFlag(void)
+uint8_t Serial2_TakeRxData(uint8_t *out)
 {
-	if (Serial2_RxFlag == 1)			//如果标志位为1
-	{
-		Serial2_RxFlag = 0;
-		return 1;					//则返回1，并自动清零标志位
-	}
-	return 0;						//如果标志位为0，则返回0
+    uint8_t got = 0;
+    // 原来那种 GetRxFlag() + GetRxData() 是两次调用，中间可以被打断：标志位还是
+    // 1 但数据已经被后一个字节盖掉了 —— 前一个字节静默消失；反过来标志位还没
+    // 置上就先读了数据，同一个字节会被执行两次（'P' 画两次车位）。
+    // 两边都圈在临界区里，读到的数据和清标志一定配套。
+    __disable_irq();
+    if (Serial2_RxFlag) {
+        *out = Serial2_RxData;
+        Serial2_RxFlag = 0;
+        got = 1;
+    }
+    __enable_irq();
+    return got;
 }
-
-/**
-  * 函    数：获取串口接收的数据
-  * 参    数：无
-  * 返 回 值：接收的数据，范围：0~255
-  */
-uint8_t Serial2_GetRxData(void)
-{
-	return Serial2_RxData;			//返回接收的数据变量
-}
-
 /**
   * 函    数：USART2中断函数
   * 参    数：无
@@ -248,104 +256,3 @@ void USART2_IRQHandler(void)
 	}
 }
 
-
-	uint8_t Serial3_RxData;		//定义串口接收的数据变量
-  uint8_t Serial3_RxFlag;
-
-void Serial3_Init(void) 
-{
-    /* 开启时钟 */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART3, ENABLE);    // USART3时钟在APB1上
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);     // GPIOB时钟
-
-    /* GPIO初始化 */
-    GPIO_InitTypeDef GPIO_InitStructure;
-    
-    // PB10作为USART3_TX（复用推挽输出）
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10;                // PB10
-    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-
-    // PB11作为USART3_RX（浮空输入）
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;     // 浮空输入
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_11;                // PB11
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-
-    /* USART初始化 */
-    USART_InitTypeDef USART_InitStructure;
-    USART_InitStructure.USART_BaudRate = 9600;
-    USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-    USART_InitStructure.USART_Mode = USART_Mode_Tx | USART_Mode_Rx;
-    USART_InitStructure.USART_Parity = USART_Parity_No;
-    USART_InitStructure.USART_StopBits = USART_StopBits_1;
-    USART_InitStructure.USART_WordLength = USART_WordLength_8b;
-    USART_Init(USART3, &USART_InitStructure);                 // USART3
-
-    /* 中断配置 */
-    USART_ITConfig(USART3, USART_IT_RXNE, ENABLE);            // USART3接收中断
-
-    /* NVIC配置 */
-    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
-    
-    NVIC_InitTypeDef NVIC_InitStructure;
-    NVIC_InitStructure.NVIC_IRQChannel = USART3_IRQn;         // USART3中断通道
-    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1;
-    NVIC_Init(&NVIC_InitStructure);
-
-    /* USART使能 */
-    USART_Cmd(USART3, ENABLE);                                // USART3
-}
-
-
-void Serial3_SendByte(uint8_t Byte)
-{
-    USART_SendData(USART3, Byte);       
-    while (USART_GetFlagStatus(USART3, USART_FLAG_TXE) == RESET);  
-}
-
-uint32_t Serial3_Pow(uint32_t X, uint32_t Y)
-{
-    uint32_t Result = 1;
-    while (Y --)
-    {
-        Result *= X;
-    }
-    return Result;
-}
-
-void Serial3_SendNumber(uint32_t Number, uint8_t Length)
-{
-    uint8_t i;
-    for (i = 0; i < Length; i ++)
-    {
-        Serial3_SendByte(Number / Serial3_Pow(10, Length - i - 1) % 10 + '0');
-    }
-}
-
-uint8_t Serial3_GetRxFlag(void)
-{
-    if (Serial3_RxFlag == 1)
-    {
-        Serial3_RxFlag = 0;
-        return 1;
-    }
-    return 0;
-}
-
-uint8_t Serial3_GetRxData(void)
-{
-    return Serial3_RxData;
-}
-
-void USART3_IRQHandler(void)  // USART3中断处理函数
-{
-    if (USART_GetITStatus(USART3, USART_IT_RXNE) == SET)  // USART3
-    {
-        Serial3_RxData = USART_ReceiveData(USART3);         // USART3
-        Serial3_RxFlag = 1;
-        USART_ClearITPendingBit(USART3, USART_IT_RXNE);    // USART3
-    }
-}

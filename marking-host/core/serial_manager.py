@@ -13,7 +13,9 @@ class SerialManager(QObject):
     # 错误信号
     error_signal = pyqtSignal(str)
 
-    def __init__(self, port="/dev/ttyS0", baudrate=9600):
+    # 默认值和 main.py 的 PORT 保持一致（/dev/serial0 = 排针串口，见那边的注释）。
+    # main.py 总是显式传进来，这儿只是别留第二个会过期的默认值。
+    def __init__(self, port="/dev/serial0", baudrate=9600):
         super().__init__()
 
         self.port = port
