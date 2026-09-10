@@ -39,9 +39,12 @@
 Intelligent-Road-Marking-Robot/
 ├── marking-host/            # 上位机（树莓派 Python + 视觉）
 │   ├── main.py              # 程序入口
-│   ├── core/                # protocol / serial_manager
+│   ├── core/                # protocol（指令表）/ serial_manager / line_quality（判据阈值）
 │   ├── ui/                  # main_window / camera_widget
-│   ├── camera_test.py       # 黄色标线检测（独立脚本）
+│   ├── protocol_test.py     # 上下位机指令集对账
+│   ├── vision_test.py       # 破损判据
+│   ├── camera_widget_test.py# C 闭环 / 限流 / 取景开关
+│   ├── camera_test.py       # 黄色标线检测（独立脚本，调试用可视化）
 │   ├── serial_test.py       # 串口收发测试
 │   ├── install.sh           # 树莓派部署脚本
 │   └── start.sh             # 桌面启动脚本
@@ -146,12 +149,21 @@ Intelligent-Road-Marking-Robot/
 
 **上位机**
 
+在树莓派上克隆仓库，然后跑安装脚本：
+
 ```bash
 cd marking-host
-python3 -m venv venv && source venv/bin/activate
-pip install pyqt5 pyserial opencv-python opencv-contrib-python numpy
+./install.sh          # 装 python3-pyqt5 / python3-serial / python3-opencv，并在桌面建启动图标
 python3 main.py
 ```
+
+**用 apt 装，不要用 pip + venv。** `pip install pyqt5` 在 aarch64 上要现场编译
+Qt，又慢又容易失败；apt 的 `python3-pyqt5` 是编好的。三个 apt 包按系统 python3
+解析，所以直接 `python3 main.py` 就行，不用激活什么环境。
+
+> 仓库里如果有个 `venv/` 目录，那是早先试过的，已经废弃 ——
+> 里面只有 cv2 和 numpy（`include-system-site-packages = false`，连 apt 装的
+> PyQt5 都看不见），激活它反而会让程序起不来。可以删掉。
 
 ## 注意事项
 
@@ -176,6 +188,8 @@ python3 main.py
   `/dev/serial0` 会自动指过去，代码一行都不用改。
 - **串口控制台必须关掉**（`raspi-config` → Interface → Serial Port → login shell 选
   No、hardware 选 Yes），否则内核日志会从 TX 打到 STM32 那边去。
+  这一项和上面的 `dtoverlay=disable-bt` **都要手动做、都要重启**，`install.sh`
+  不碰系统配置 —— 它只装包、把当前用户加进 `dialout` 组、生成桌面图标。
 - **步进是开环的**，没有编码器，丢步不可恢复。所以运动起停都走梯形斜坡
   （`RAMP_SOFT_ARR` 1800 → `speed_arr`，每 `RAMP_SOFT_STEP_PULSE` 个脉冲走
   `RAMP_SOFT_STEP_ARR`）；调试时别绕过斜坡，也别在加速段中间硬改频率。
