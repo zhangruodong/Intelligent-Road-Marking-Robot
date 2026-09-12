@@ -22,6 +22,9 @@ JLinkLog.txt
 
 # 编辑器 / 系统
 .vscode/
+# Claude Code 的本地权限配置。这台机器上另有一份全局 gitignore 也挡着它，
+# 但那份不跟着仓库走 —— 换台机器就没人挡了，所以在仓库里也写一遍。
+.claude/
 *.suo
 Thumbs.db
 Desktop.ini
