@@ -19,3 +19,22 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This MIT license covers ONLY the code written by this project's author:
+marking-firmware/Hardware/, marking-firmware/User/, and marking-host/.
+
+The following directories contain third-party code under separate terms and
+are NOT covered by this license:
+
+  marking-firmware/Library/   STM32F10x Standard Peripheral Library V3.5.0
+                              (c) 2011 STMicroelectronics, MCD Application Team
+  marking-firmware/Start/     ARM CMSIS core_cm3 V1.30 (c) 2009 ARM Limited,
+                              plus ST startup files and system_stm32f10x
+                              (c) 2011 STMicroelectronics
+
+They are redistributed here unmodified, with their original copyright notices
+intact, for the sole purpose of building this project. See
+THIRD_PARTY_NOTICES.md for details. Because of them, this repository as a
+whole cannot be described simply as "MIT licensed".

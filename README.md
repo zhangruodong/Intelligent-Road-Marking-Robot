@@ -200,3 +200,21 @@ Qt，又慢又容易失败；apt 的 `python3-pyqt5` 是编好的。三个 apt �
   就没有保持力矩，机械臂会靠重力耷下来。
 - **PA13（SWDIO）/ PA14（SWCLK）保留给 SWD 下载调试**，不要接外设。
 - 步进电机方向宏（`M1_FWD` ~ `M4_REV`）已按实车标定，若换电机 / 接线后方向反转，在 `StepMotor_New.h` 里取反即可。
+
+## 许可
+
+本项目作者写的代码（`marking-firmware/Hardware/`、`marking-firmware/User/`、
+`marking-host/`）按顶层 [LICENSE](LICENSE) 的 **MIT** 授权。
+
+但仓库里还带着两坨第三方代码，**不在 MIT 覆盖范围内**：
+
+| 目录 | 内容 | 归属 |
+|---|---|---|
+| `marking-firmware/Library/` | STM32F10x 标准外设库 V3.5.0（46 个文件） | © 2011 STMicroelectronics |
+| `marking-firmware/Start/` | ARM CMSIS `core_cm3` + ST 启动文件 | © 2009 ARM Limited / © 2011 STMicroelectronics |
+
+ST 那份是 ST 自家的协议（不是 OSI 开源协议），ARM 那份的授权也比 MIT 窄。
+所以**这个仓库整体不能简单说成 "MIT 许可"** —— 详见表
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+那两个目录里的版权声明请**不要删改**，删了就失去了归属信息。
