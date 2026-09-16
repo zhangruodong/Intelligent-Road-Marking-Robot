@@ -200,3 +200,18 @@ Qt，又慢又容易失败；apt 的 `python3-pyqt5` 是编好的。三个 apt �
   就没有保持力矩，机械臂会靠重力耷下来。
 - **PA13（SWDIO）/ PA14（SWCLK）保留给 SWD 下载调试**，不要接外设。
 - 步进电机方向宏（`M1_FWD` ~ `M4_REV`）已按实车标定，若换电机 / 接线后方向反转，在 `StepMotor_New.h` 里取反即可。
+
+## 许可
+
+**MIT** —— 见 [LICENSE](LICENSE)。
+
+仓库里另外随带两份第三方代码（STM32F10x 标准外设库、ARM CMSIS），它们是 ST /
+ARM 的，不归本项目授权，各自沿用原条款：
+
+| 目录 | 内容 | 归属 |
+|---|---|---|
+| `marking-firmware/Library/` | STM32F10x 标准外设库 V3.5.0（46 个文件） | © 2011 STMicroelectronics |
+| `marking-firmware/Start/` | ARM CMSIS `core_cm3` + ST 启动文件 | © 2009 ARM Limited / © 2011 STMicroelectronics |
+
+这些文件一律原样保留，版权声明未作改动。细节见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
